@@ -1,0 +1,49 @@
+from __future__ import print_function
+from fenics import *
+import numpy as np
+
+T = 0.5            # final time
+num_steps = 100     # number of time steps
+dt = T / num_steps # time step size
+K=1.0       # parameter K; try 0.1 too
+uExt = 0 # external temperature u_{ext}
+
+# Create mesh and define function space
+mesh = Mesh('pan.xml')
+V = FunctionSpace(mesh, 'P', 1)
+# Define boundary condition
+boundary_parts = MeshFunction("size_t", mesh, mesh.topology().dim()-1)
+file0= File("boundary_parts.pvd")
+boundary_parts.set_all(0)
+tol = 1e-10 # tolerance for coordinate comparisons
+
+class BottomDirichletBoundary(SubDomain):
+  def inside(self, x, on_boundary):
+    return on_boundary and abs(x[2]) < tol 
+# add "and (x[0]*x[0]+x[1]*x[1]<0.25)" if flame is smaller than pan
+
+BottomDirichletBoundary().mark(boundary_parts, 1)
+file0 << boundary_parts
+u_D = Constant(1.0) # boundary value u_H imposed at z=0
+bc = DirichletBC(V, u_D, boundary_parts, 1)
+# Redefine boundary integration measure
+dss = Measure('ds', domain=mesh, subdomain_data=boundary_parts)
+
+# Define variational problem
+u = TrialFunction(V)
+v = TestFunction(V)
+u_n = interpolate(Constant(0.0), V) # Define initial value
+F = u*v*dx + dt*K*(u-uExt)*v*dss(0) + dt*dot(grad(u), grad(v))*dx - u_n*v*dx
+a, L = lhs(F), rhs(F)
+# Create VTK file for saving solution
+vtkfile = File('HeatedPanWithExternalCooling/solution.pvd')
+u = Function(V)
+t = 0 # Time-stepping
+
+for n in range(num_steps):
+    # Compute solution
+    solve(a == L, u, bc)
+    # Save solution at this time, update previous solution and time
+    vtkfile << (u_n, t)
+    u_n.assign(u)
+    t += dt
